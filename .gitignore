@@ -1,0 +1,7 @@
+# .gitignore
+
+# Ignore temporary directories and files
+tmp/
+temp/
+*.log
+parallel_lib_*
