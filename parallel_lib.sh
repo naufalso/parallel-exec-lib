@@ -4,6 +4,8 @@
 # Parallel Execution Library
 # Author: Naufal Suryanto
 # Description: A bash library for running commands in parallel using tmux.
+# Refined by: [Your Name]
+# Added Features: Support for Conda environments and CUDA_VISIBLE_DEVICES
 
 # Initialize the parallel execution environment
 init_parallel_execution() {
@@ -57,6 +59,13 @@ start_workers() {
         # Create FIFOs for communication
         mkfifo "$fifo"
 
+        # Calculate GPU index for the worker
+        if [ -n "${gpu_indexes[*]}" ]; then
+            gpu_index=${gpu_indexes[$((i % ${#gpu_indexes[@]}))]}
+        else
+            gpu_index=""
+        fi
+
         # Create a temporary worker script
         worker_script="$temp_dir/worker_$$_$i.sh"
         worker_status_file="$temp_dir/worker_$$_$i.status"
@@ -67,6 +76,20 @@ pane_index=$pane_index
 status_file="$worker_status_file"
 touch "\$status_file"
 echo "Worker \$pane_index starting"
+
+# Activate Conda environment if specified
+if [ -n "$conda_env" ]; then
+    echo "Worker \$pane_index activating Conda environment: $conda_env"
+    source "$(conda info --base)/etc/profile.d/conda.sh"
+    conda activate "$conda_env"
+fi
+
+# Set CUDA_VISIBLE_DEVICES if specified
+if [ -n "$gpu_index" ]; then
+    export CUDA_VISIBLE_DEVICES="$gpu_index"
+    echo "Worker \$pane_index using GPU: \$CUDA_VISIBLE_DEVICES"
+fi
+
 while true; do
     if read -r cmd < "\$fifo"; then
         echo "Worker \$pane_index received command: \$cmd"

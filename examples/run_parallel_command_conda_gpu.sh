@@ -1,15 +1,25 @@
 #!/bin/bash
-# run_parallel_commands.sh
+# run_parallel_commands_conda_gpu.sh
 # Example script to demonstrate parallel execution using parallel_lib.sh
 
 # Source the library
 source ./parallel_lib.sh
 
 # Set the number of parallel processes
-num_parallel_processes=3  # Adjust this number as needed
+num_parallel_processes=4  # Adjust this number as needed
 
 # Set the tmux session name (optional)
 tmux_session_name="my_parallel_session"  # Replace with your desired session name
+
+# Define the Conda environment (optional)
+conda_env="my_env"  # Replace with your Conda environment name
+
+# Define GPU indexes (optional)
+gpu_indexes=(0 1 2)  # List of available GPU indexes
+
+# Export variables so they are accessible in the library functions
+export conda_env
+export gpu_indexes
 
 # Initialize the parallel execution environment
 init_parallel_execution "$num_parallel_processes" "$tmux_session_name"
