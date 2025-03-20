@@ -4,7 +4,6 @@
 # Parallel Execution Library
 # Author: Naufal Suryanto
 # Description: A bash library for running commands in parallel using tmux.
-# Refined by: [Your Name]
 # Added Features: Support for Conda environments and CUDA_VISIBLE_DEVICES
 
 # Initialize the parallel execution environment
@@ -55,9 +54,13 @@ start_workers() {
         fi
         pane_index=$i
         fifo="$temp_dir/fifo_$$_$i"
+        ready_file="$temp_dir/worker_$$_$i.ready"
 
         # Create FIFOs for communication
         mkfifo "$fifo"
+        
+        # Mark worker as ready initially
+        touch "$ready_file"
 
         # Calculate GPU index for the worker
         if [ -n "${gpu_indexes[*]}" ]; then
@@ -74,7 +77,9 @@ start_workers() {
 fifo="$fifo"
 pane_index=$pane_index
 status_file="$worker_status_file"
+ready_file="$ready_file"
 touch "\$status_file"
+touch "\$ready_file"
 echo "Worker \$pane_index starting"
 
 # Activate Conda environment if specified
@@ -92,18 +97,26 @@ fi
 
 while true; do
     if read -r cmd < "\$fifo"; then
+        # Remove the ready file to indicate we're busy
+        rm -f "\$ready_file" 
+        
         echo "Worker \$pane_index received command: \$cmd"
         if [ "\$cmd" == "exit" ]; then
             echo "Worker \$pane_index exiting"
             break
         fi
         eval "\$cmd"
+        
+        # Create ready file to indicate we're available for more work
+        touch "\$ready_file"
+        echo "Worker \$pane_index ready for next task"
     else
-        sleep 1
+        sleep 0.5
     fi
 done
 echo "Worker \$pane_index finished"
 rm -f "\$status_file"
+rm -f "\$ready_file"
 exit 0
 EOF
         chmod +x "$worker_script"
@@ -118,23 +131,60 @@ run_commands_in_parallel() {
     commands=("$@")  # Accept the commands as arguments to the function
     total_commands=${#commands[@]}
     command_index=0
-
-    while [ $command_index -lt $total_commands ]; do
+    
+    # Set to track assigned commands
+    assigned_commands=0
+    
+    echo "Total commands to execute: $total_commands"
+    
+    # Continue until all commands are completed
+    while [ $assigned_commands -lt $total_commands ]; do
+        # Check for available workers
         for ((i=0; i<n; i++)); do
+            # Skip if we've already assigned all commands
+            if [ $assigned_commands -ge $total_commands ]; then
+                break
+            fi
+            
+            ready_file="$temp_dir/worker_$$_$i.ready"
             fifo="$temp_dir/fifo_$$_$i"
-            if [ $command_index -lt $total_commands ]; then
-                echo "Sending command to worker $i: ${commands[$command_index]}"
+            
+            # If worker is ready (file exists), assign new work
+            if [ -f "$ready_file" ]; then
+                echo "Worker $i is ready. Sending command: ${commands[$command_index]}"
                 echo "${commands[$command_index]}" > "$fifo"
                 command_index=$((command_index + 1))
+                assigned_commands=$((assigned_commands + 1))
             fi
         done
-        sleep 1
+        
+        # Small sleep to avoid high CPU usage when polling
+        sleep 0.2
     done
+    
+    echo "All $total_commands commands have been assigned to workers"
 }
 
 # Signal workers to exit
 stop_workers() {
-    # Signal workers to exit after all commands are sent
+    # Wait for all workers to be ready (meaning they've completed their tasks)
+    all_ready=false
+    while [ "$all_ready" = false ]; do
+        all_ready=true
+        for ((i=0; i<n; i++)); do
+            ready_file="$temp_dir/worker_$$_$i.ready"
+            if [ ! -f "$ready_file" ]; then
+                all_ready=false
+                echo "Waiting for worker $i to complete its task..."
+                break
+            fi
+        done
+        if [ "$all_ready" = false ]; then
+            sleep 1
+        fi
+    done
+    
+    # Signal workers to exit after all commands are completed
     for ((i=0; i<n; i++)); do
         fifo="$temp_dir/fifo_$$_$i"
         echo "Sending 'exit' to worker $i"
